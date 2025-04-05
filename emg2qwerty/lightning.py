@@ -24,6 +24,7 @@ from emg2qwerty.metrics import CharacterErrorRates
 from emg2qwerty.modules import (
     MultiBandRotationInvariantMLP,
     SpectrogramNorm,
+    ProxyBNN_CNN_LSTM,
     TDSConvEncoder,
 )
 from emg2qwerty.transforms import Transform
@@ -169,10 +170,11 @@ class TDSConvCTCModule(pl.LightningModule):
             ),
             # (T, N, num_features)
             nn.Flatten(start_dim=2),
-            TDSConvEncoder(
+            #####HERE EDIT HERE CHAGNE THE WAY THIS MODEL WORKS
+            ProxyBNN_CNN_LSTM(
                 num_features=num_features,
-                block_channels=block_channels,
-                kernel_width=kernel_width,
+                num_output_features=num_features,
+                num_basis_vectors = 50,
             ),
             # (T, N, num_classes)
             nn.Linear(num_features, charset().num_classes),

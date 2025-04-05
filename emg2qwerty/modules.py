@@ -8,6 +8,7 @@ from collections.abc import Sequence
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 
 class SpectrogramNorm(nn.Module):
@@ -270,6 +271,7 @@ class TDSConvEncoder(nn.Module):
             ), "block_channels must evenly divide num_features"
             tds_conv_blocks.extend(
                 [
+                    #edit here
                     TDSConv2dBlock(channels, num_features // channels, kernel_width),
                     TDSFullyConnectedBlock(num_features),
                 ]
@@ -278,3 +280,62 @@ class TDSConvEncoder(nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.tds_conv_blocks(inputs)  # (T, N, num_features)
+
+
+
+class ProxyConv1D(nn.Module): #Gpt aided in generation of this class's code
+    """ProxyBNN 1D Convolutional Layer for sEMG Processing"""
+    def __init__(self, in_channels, out_channels, kernel_size, num_basis_vectors, stride=1, padding=1):
+        super(ProxyConv1D, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.num_basis_vectors = num_basis_vectors
+        self.stride = stride
+        self.padding = padding
+
+        self.R = nn.Parameter(torch.randn(num_basis_vectors, in_channels * kernel_size))
+
+        self.alpha = nn.Parameter(torch.randn(out_channels, num_basis_vectors))
+
+        self.batch_norm = nn.BatchNorm1d(out_channels)
+
+    def forward(self, x):
+
+        W_pre = torch.mm(self.alpha, self.R)  
+
+        W_pre = W_pre.view(self.out_channels, self.in_channels, self.kernel_size)
+
+        W_bin = torch.sign(W_pre)
+
+        x = F.conv1d(x, W_bin, stride=self.stride, padding=self.padding)
+        x = self.batch_norm(x)
+        return x
+
+class ProxyBNN_CNN_LSTM(nn.Module):
+    def __init__(self, num_features, num_output_features, num_basis_vectors=10, hidden_size=256):
+        super(ProxyBNN_CNN_LSTM, self).__init__()
+        self.conv1 = ProxyConv1D(num_features, 64, kernel_size=5, num_basis_vectors=num_basis_vectors, stride=1, padding=2)
+        self.conv2 = ProxyConv1D(64, 128, kernel_size=5, num_basis_vectors=num_basis_vectors, stride=1, padding=2)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.gru = nn.GRU(input_size=128, hidden_size=256, num_layers=1, batch_first=True)
+        self.fc1 = nn.Linear(256, 128)
+        self.fc2 = nn.Linear(128, num_output_features)
+
+    def forward(self, x):
+        x = x.permute(1, 2, 0)
+        x = F.relu(self.conv1(x))
+        x = F.max_pool1d(x, 2, 2)
+        x = F.relu(self.conv2(x))
+        x = F.max_pool1d(x, 2, 2)
+        x = self.bn2(x)
+
+        x = x.permute(0, 2, 1)
+
+        x, _ = self.gru(x)
+
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        x = x.permute(1, 0, 2)
+
+        return x 
